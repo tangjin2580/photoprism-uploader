@@ -6,7 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import https from 'https';
-import http from 'http';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -19,15 +19,14 @@ const uploadFolder = path.join(__dirname, 'uploads');
 // 确保上传目录存在
 if (!fs.existsSync(uploadFolder)) {
     fs.mkdirSync(uploadFolder, { recursive: true });
+    console.log(`上传目录已创建: ${uploadFolder}`);
+} else {
+    console.log(`上传目录已存在: ${uploadFolder}`);
 }
 
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadFolder);
-    },
-    filename: function (req, file, cb) {
-        cb(null, file.originalname);
-    }
+    destination: (req, file, cb) => cb(null, uploadFolder),
+    filename: (req, file, cb) => cb(null, file.originalname)
 });
 
 const fileFilter = (req, file, cb) => {
@@ -39,21 +38,72 @@ const fileFilter = (req, file, cb) => {
 };
 
 const upload = multer({
-    storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 }, // 限制单个文件大小为 10MB
-    fileFilter: fileFilter
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter
 });
 
 const PORT = process.env.PORT || 3000;
 
-const WEBDAV_URL = process.env.WEBDAV_URL; // 例如 http://14.18.248.25:2342/originals/
-const WEBDAV_USER = process.env.WEBDAV_USER; // 例如 admin
-const WEBDAV_PASSWORD = process.env.WEBDAV_PASSWORD; // 密码
-const SSL_KEY_PATH = process.env.SSL_KEY_PATH || '/etc/nginx/ssl/key.pem';
-const SSL_CERT_PATH = process.env.SSL_CERT_PATH || '/etc/nginx/ssl/cert.pem';
+const WEBDAV_URL = process.env.WEBDAV_URL;
+const WEBDAV_USER = process.env.WEBDAV_USER;
+const WEBDAV_PASSWORD = process.env.WEBDAV_PASSWORD;
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH || '/etc/nginx/ssl/privkey.pem';
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH || '/etc/nginx/ssl/fullchain.pem';
 
 if (!WEBDAV_URL || !WEBDAV_USER || !WEBDAV_PASSWORD) {
     console.error('请在 .env 文件中配置 WEBDAV_URL、WEBDAV_USER 和 WEBDAV_PASSWORD');
+    process.exit(1);
+}
+
+function checkPemFormat(pemContent, type) {
+    if (type === 'key') {
+        return pemContent.includes('-----BEGIN') && (
+            pemContent.includes('PRIVATE KEY-----') || pemContent.includes('ENCRYPTED PRIVATE KEY-----')
+        );
+    } else if (type === 'cert') {
+        return pemContent.includes('-----BEGIN CERTIFICATE-----');
+    }
+    return false;
+}
+
+function verifyKeyCertMatch(keyPem, certPem) {
+    try {
+        // 使用 crypto.createPrivateKey 和 crypto.X509Certificate 进行匹配验证
+        const privateKeyObject = crypto.createPrivateKey(keyPem);
+        const certObject = new crypto.X509Certificate(certPem);
+
+        const publicKeyFromCert = certObject.publicKey.export({ type: 'spki', format: 'pem' });
+        const publicKeyFromKey = crypto.createPublicKey(privateKeyObject).export({ type: 'spki', format: 'pem' });
+
+        return publicKeyFromCert === publicKeyFromKey;
+    } catch (error) {
+        console.error('验证私钥和证书匹配时出错:', error);
+        return false;
+    }
+}
+
+// 读取并验证证书和私钥
+let keyPem, certPem;
+try {
+    keyPem = fs.readFileSync(SSL_KEY_PATH, 'utf8');
+    certPem = fs.readFileSync(SSL_CERT_PATH, 'utf8');
+    console.log(`读取 SSL 私钥 长度: ${keyPem.length}`);
+    console.log(`读取 SSL 证书 长度: ${certPem.length}`);
+
+    if (!checkPemFormat(keyPem, 'key')) {
+        throw new Error('私钥文件格式错误（未检测到正确的 BEGIN PRIVATE KEY 标识）');
+    }
+    if (!checkPemFormat(certPem, 'cert')) {
+        throw new Error('证书文件格式错误（未检测到正确的 BEGIN CERTIFICATE 标识）');
+    }
+
+    if (!verifyKeyCertMatch(keyPem, certPem)) {
+        throw new Error('私钥和证书内容不匹配');
+    }
+    console.log('私钥和证书验证通过');
+} catch (error) {
+    console.error('读取 SSL 证书或私钥失败:', error);
     process.exit(1);
 }
 
@@ -65,22 +115,16 @@ const client = createClient(
     }
 );
 
-// 处理上传请求
+// 上传接口
 app.post('/upload', upload.single('file'), async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({ error: '上传文件为空' });
-        }
+        if (!req.file) return res.status(400).json({ error: '上传文件为空' });
 
         console.log(`准备上传文件：${req.file.originalname}，大小：${req.file.size} bytes`);
 
-        // 获取当前日期
         const currentDate = new Date().toISOString().split('T')[0];
-
-        // 创建文件夹路径
         const folderPath = `/${currentDate}/`;
 
-        // 检查文件夹是否存在，如果不存在则创建
         const exists = await client.exists(folderPath);
         if (!exists) {
             await client.createDirectory(folderPath, { recursive: true });
@@ -89,41 +133,27 @@ app.post('/upload', upload.single('file'), async (req, res) => {
             console.log(`文件夹已存在：${folderPath}`);
         }
 
-        // 上传文件到对应的文件夹
         const filePath = `${folderPath}${req.file.originalname}`;
         await client.putFileContents(filePath, fs.readFileSync(req.file.path), { overwrite: true });
 
-        // 删除临时文件
         fs.unlinkSync(req.file.path);
 
         console.log(`上传成功，文件已写入 WebDAV 的 ${filePath}`);
 
-        return res.json({ status: 'success', message: `上传成功（WebDAV）到 ${filePath}` });
+        res.json({ status: 'success', message: `上传成功（WebDAV）到 ${filePath}` });
     } catch (err) {
         console.error('上传失败:', err);
-        return res.status(500).json({ error: '上传失败', details: err.message });
+        res.status(500).json({ error: '上传失败', details: err.message });
     }
 });
 
-// 静态资源托管
 app.use(express.static(path.join(__dirname, 'public')));
-
-// 根路径返回 index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// 创建 HTTP 和 HTTPS 服务器
-const httpServer = http.createServer(app);
-const httpsServer = https.createServer({
-    key: fs.readFileSync(SSL_KEY_PATH),
-    cert: fs.readFileSync(SSL_CERT_PATH)
-}, app);
+const httpsServer = https.createServer({ key: keyPem, cert: certPem }, app);
 
-httpServer.listen(3000, () => {
-    console.log(`HTTP Server 运行在 http://localhost:3000`);
-});
-
-httpsServer.listen(8443, () => {
-    console.log(`HTTPS Server 运行在 https://localhost:8443`);
+httpsServer.listen(PORT, () => {
+    console.log(`HTTPS Server 运行在 https://localhost:${PORT}`);
 });
