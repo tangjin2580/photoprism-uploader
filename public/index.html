@@ -19,22 +19,28 @@
         #camera-container {
             margin: 20px 0;
         }
+        /* 给 video 加硬件加速提示 */
         #video {
             background-color: #eee;
             width: 100%;
             max-width: 640px;
             border: 1px solid #ccc;
             border-radius: 4px;
+            will-change: transform, opacity;
+            transform: translateZ(0);
         }
         #canvas {
             display: none;
         }
+        /* 预览图也加硬件加速提示 */
         #preview {
             margin-top: 10px;
             max-width: 320px;
             border: 1px solid #ccc;
             border-radius: 4px;
             display: none;
+            will-change: transform, opacity;
+            transform: translateZ(0);
         }
         .button-container {
             margin: 20px 0;
@@ -102,6 +108,7 @@
     <button id="startButton">启动摄像头</button>
     <button id="captureButton" disabled>拍照</button>
     <button id="uploadButton" disabled>上传照片</button>
+    <button id="stopButton" disabled>关闭摄像头</button>
 </div>
 
 <div class="upload-container">
@@ -119,14 +126,15 @@
     const startButton = document.getElementById('startButton');
     const captureButton = document.getElementById('captureButton');
     const uploadButton = document.getElementById('uploadButton');
+    const stopButton = document.getElementById('stopButton');
     const localFileInput = document.getElementById('localFileInput');
     const localUploadButton = document.getElementById('localUploadButton');
     const statusDiv = document.getElementById('status');
 
     let stream = null;
     let photoData = null;
+    let previewUrl = null;
 
-    // 格式化时间，返回 yyyyMMdd_HHmmss 格式字符串
     function formatTimestamp(date) {
         const pad = (n) => n.toString().padStart(2, '0');
         return date.getFullYear().toString() +
@@ -154,6 +162,7 @@
             video.srcObject = stream;
 
             captureButton.disabled = false;
+            stopButton.disabled = false;
             startButton.disabled = true;
             statusDiv.textContent = "摄像头已启动";
             statusDiv.className = "success";
@@ -164,8 +173,29 @@
         }
     });
 
+    // 关闭摄像头，释放资源
+    stopButton.addEventListener('click', () => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+            video.srcObject = null;
+            statusDiv.textContent = "摄像头已关闭";
+            statusDiv.className = "success";
+
+            captureButton.disabled = true;
+            uploadButton.disabled = true;
+            stopButton.disabled = true;
+            startButton.disabled = false;
+        }
+    });
+
     // 拍照
     captureButton.addEventListener('click', () => {
+        if (!stream) {
+            statusDiv.textContent = "摄像头未启动";
+            statusDiv.className = "error";
+            return;
+        }
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
@@ -173,9 +203,14 @@
 
         canvas.toBlob((blob) => {
             photoData = blob;
-            // 显示预览
-            const url = URL.createObjectURL(blob);
-            preview.src = url;
+
+            // 释放之前的 URL 对象，防止内存泄漏
+            if (previewUrl) {
+                URL.revokeObjectURL(previewUrl);
+            }
+            previewUrl = URL.createObjectURL(blob);
+
+            preview.src = previewUrl;
             preview.style.display = 'block';
 
             uploadButton.disabled = false;
@@ -193,11 +228,8 @@
         }
 
         const formData = new FormData();
-
-        // 用当前时间格式化命名文件名
         const timestamp = formatTimestamp(new Date());
         const filename = `YiBao_${timestamp}.jpg`;
-
         formData.append('file', photoData, filename);
 
         try {
@@ -213,8 +245,6 @@
                 statusDiv.textContent = responseJson.message || "照片上传成功！";
                 statusDiv.className = "success";
                 uploadButton.disabled = true;
-                // 上传成功后可以选择清空预览或保留
-                // preview.style.display = 'none';
             } else {
                 const errorJson = await uploadResponse.json();
                 throw new Error(`上传失败: ${errorJson.error || uploadResponse.statusText}`);
@@ -231,9 +261,13 @@
         const file = event.target.files[0];
         if (file) {
             photoData = file;
-            // 显示预览
-            const url = URL.createObjectURL(file);
-            preview.src = url;
+
+            if (previewUrl) {
+                URL.revokeObjectURL(previewUrl);
+            }
+            previewUrl = URL.createObjectURL(file);
+
+            preview.src = previewUrl;
             preview.style.display = 'block';
 
             localUploadButton.disabled = false;
@@ -254,11 +288,8 @@
         }
 
         const formData = new FormData();
-
-        // 用当前时间格式化命名文件名
         const timestamp = formatTimestamp(new Date());
         const filename = `YiBao_${timestamp}.jpg`;
-
         formData.append('file', photoData, filename);
 
         try {
@@ -274,8 +305,6 @@
                 statusDiv.textContent = responseJson.message || "照片上传成功！";
                 statusDiv.className = "success";
                 localUploadButton.disabled = true;
-                // 上传成功后可以选择清空预览或保留
-                // preview.style.display = 'none';
             } else {
                 const errorJson = await uploadResponse.json();
                 throw new Error(`上传失败: ${errorJson.error || uploadResponse.statusText}`);
