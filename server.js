@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import https from 'https';
+import http from 'http';
 
 dotenv.config();
 
@@ -15,7 +17,7 @@ const app = express();
 const uploadFolder = path.join(__dirname, 'uploads');
 
 // 确保上传目录存在
-if (!fs.existsSync(uploadFolder)){
+if (!fs.existsSync(uploadFolder)) {
     fs.mkdirSync(uploadFolder, { recursive: true });
 }
 
@@ -47,6 +49,8 @@ const PORT = process.env.PORT || 3000;
 const WEBDAV_URL = process.env.WEBDAV_URL; // 例如 http://14.18.248.25:2342/originals/
 const WEBDAV_USER = process.env.WEBDAV_USER; // 例如 admin
 const WEBDAV_PASSWORD = process.env.WEBDAV_PASSWORD; // 密码
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH || '/etc/nginx/ssl/key.pem';
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH || '/etc/nginx/ssl/cert.pem';
 
 if (!WEBDAV_URL || !WEBDAV_USER || !WEBDAV_PASSWORD) {
     console.error('请在 .env 文件中配置 WEBDAV_URL、WEBDAV_USER 和 WEBDAV_PASSWORD');
@@ -109,6 +113,17 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-    console.log(`Server 运行在 http://localhost:${PORT}`);
+// 创建 HTTP 和 HTTPS 服务器
+const httpServer = http.createServer(app);
+const httpsServer = https.createServer({
+    key: fs.readFileSync(SSL_KEY_PATH),
+    cert: fs.readFileSync(SSL_CERT_PATH)
+}, app);
+
+httpServer.listen(3000, () => {
+    console.log(`HTTP Server 运行在 http://localhost:3000`);
+});
+
+httpsServer.listen(8443, () => {
+    console.log(`HTTPS Server 运行在 https://localhost:8443`);
 });

@@ -140,6 +140,9 @@
     // 启动摄像头
     startButton.addEventListener('click', async () => {
         try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('浏览器不支持 navigator.mediaDevices.getUserMedia');
+            }
             stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     width: 1920,
@@ -149,6 +152,7 @@
                 audio: false
             });
             video.srcObject = stream;
+
             captureButton.disabled = false;
             startButton.disabled = true;
             statusDiv.textContent = "摄像头已启动";
