@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PhotoPrism 拍照上传</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f4f4f9;
+        }
+        h1 {
+            color: #333;
+        }
+        #camera-container {
+            margin: 20px 0;
+        }
+        #video {
+            background-color: #eee;
+            width: 100%;
+            max-width: 640px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #canvas {
+            display: none;
+        }
+        #preview {
+            margin-top: 10px;
+            max-width: 320px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            display: none;
+        }
+        .button-container {
+            margin: 20px 0;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #45a049;
+        }
+        .upload-container {
+            margin: 20px 0;
+        }
+        .upload-title {
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .upload-input {
+            margin-bottom: 10px;
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+    </style>
+</head>
+<body>
+<h1>PhotoPrism 拍照上传</h1>
+
+<div id="camera-container">
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+</div>
+
+<!-- 预览图 -->
+<img id="preview" alt="照片预览" />
+
+<div class="button-container">
+    <button id="startButton">启动摄像头</button>
+    <button id="captureButton" disabled>拍照</button>
+    <button id="uploadButton" disabled>上传照片</button>
+</div>
+
+<div class="upload-container">
+    <h2 class="upload-title">本地上传</h2>
+    <input type="file" id="localFileInput" class="upload-input" accept="image/*" />
+    <button id="localUploadButton" class="upload-button" disabled>上传本地照片</button>
+</div>
+
+<div id="status"></div>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const preview = document.getElementById('preview');
+    const startButton = document.getElementById('startButton');
+    const captureButton = document.getElementById('captureButton');
+    const uploadButton = document.getElementById('uploadButton');
+    const localFileInput = document.getElementById('localFileInput');
+    const localUploadButton = document.getElementById('localUploadButton');
+    const statusDiv = document.getElementById('status');
+
+    let stream = null;
+    let photoData = null;
+
+    // 格式化时间，返回 yyyyMMdd_HHmmss 格式字符串
+    function formatTimestamp(date) {
+        const pad = (n) => n.toString().padStart(2, '0');
+        return date.getFullYear().toString() +
+            pad(date.getMonth() + 1) +
+            pad(date.getDate()) + '_' +
+            pad(date.getHours()) +
+            pad(date.getMinutes()) +
+            pad(date.getSeconds());
+    }
+
+    // 启动摄像头
+    startButton.addEventListener('click', async () => {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: 1920,
+                    height: 1080,
+                    facingMode: 'environment'
+                },
+                audio: false
+            });
+            video.srcObject = stream;
+            captureButton.disabled = false;
+            startButton.disabled = true;
+            statusDiv.textContent = "摄像头已启动";
+            statusDiv.className = "success";
+        } catch (err) {
+            statusDiv.textContent = "无法访问摄像头: " + err.message;
+            statusDiv.className = "error";
+            console.error("摄像头错误:", err);
+        }
+    });
+
+    // 拍照
+    captureButton.addEventListener('click', () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        canvas.toBlob((blob) => {
+            photoData = blob;
+            // 显示预览
+            const url = URL.createObjectURL(blob);
+            preview.src = url;
+            preview.style.display = 'block';
+
+            uploadButton.disabled = false;
+            statusDiv.textContent = "照片已捕获，准备上传";
+            statusDiv.className = "success";
+        }, 'image/jpeg', 0.95);
+    });
+
+    // 上传照片
+    uploadButton.addEventListener('click', async () => {
+        if (!photoData) {
+            statusDiv.textContent = "没有可上传的照片";
+            statusDiv.className = "error";
+            return;
+        }
+
+        const formData = new FormData();
+
+        // 用当前时间格式化命名文件名
+        const timestamp = formatTimestamp(new Date());
+        const filename = `YiBao_${timestamp}.jpg`;
+
+        formData.append('file', photoData, filename);
+
+        try {
+            const uploadUrl = window.location.origin + '/upload';
+
+            const uploadResponse = await fetch(uploadUrl, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (uploadResponse.ok) {
+                const responseJson = await uploadResponse.json();
+                statusDiv.textContent = responseJson.message || "照片上传成功！";
+                statusDiv.className = "success";
+                uploadButton.disabled = true;
+                // 上传成功后可以选择清空预览或保留
+                // preview.style.display = 'none';
+            } else {
+                const errorJson = await uploadResponse.json();
+                throw new Error(`上传失败: ${errorJson.error || uploadResponse.statusText}`);
+            }
+        } catch (err) {
+            statusDiv.textContent = "上传错误: " + err.message;
+            statusDiv.className = "error";
+            console.error("上传错误:", err);
+        }
+    });
+
+    // 处理本地文件选择
+    localFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            photoData = file;
+            // 显示预览
+            const url = URL.createObjectURL(file);
+            preview.src = url;
+            preview.style.display = 'block';
+
+            localUploadButton.disabled = false;
+            statusDiv.textContent = "本地照片已选择，准备上传";
+            statusDiv.className = "success";
+        } else {
+            statusDiv.textContent = "未选择本地照片";
+            statusDiv.className = "error";
+        }
+    });
+
+    // 上传本地照片
+    localUploadButton.addEventListener('click', async () => {
+        if (!photoData) {
+            statusDiv.textContent = "没有可上传的照片";
+            statusDiv.className = "error";
+            return;
+        }
+
+        const formData = new FormData();
+
+        // 用当前时间格式化命名文件名
+        const timestamp = formatTimestamp(new Date());
+        const filename = `YiBao_${timestamp}.jpg`;
+
+        formData.append('file', photoData, filename);
+
+        try {
+            const uploadUrl = window.location.origin + '/upload';
+
+            const uploadResponse = await fetch(uploadUrl, {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (uploadResponse.ok) {
+                const responseJson = await uploadResponse.json();
+                statusDiv.textContent = responseJson.message || "照片上传成功！";
+                statusDiv.className = "success";
+                localUploadButton.disabled = true;
+                // 上传成功后可以选择清空预览或保留
+                // preview.style.display = 'none';
+            } else {
+                const errorJson = await uploadResponse.json();
+                throw new Error(`上传失败: ${errorJson.error || uploadResponse.statusText}`);
+            }
+        } catch (err) {
+            statusDiv.textContent = "上传错误: " + err.message;
+            statusDiv.className = "error";
+            console.error("上传错误:", err);
+        }
+    });
+</script>
+</body>
+</html>

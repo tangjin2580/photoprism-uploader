@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PhotoPrism 拍照上传</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #video {
+            width: 100%;
+            max-width: 640px;
+            background: #eee;
+        }
+        button {
+            margin: 10px 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+    </style>
+</head>
+<body>
+<h1>PhotoPrism 拍照上传</h1>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas" style="display:none"></canvas>
+
+<div>
+    <button id="startButton">启动摄像头</button>
+    <button id="captureButton" disabled>拍照</button>
+    <button id="uploadButton" disabled>上传照片</button>
+</div>
+
+<div id="status"></div>
+
+<script>
+    const startButton = document.getElementById('startButton');
+    const captureButton = document.getElementById('captureButton');
+    const uploadButton = document.getElementById('uploadButton');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const statusDiv = document.getElementById('status');
+
+    let stream = null;
+    let photoBlob = null;
+
+    async function login() {
+        try {
+            const resp = await fetch('/api/login', {
+                method: 'POST',
+                credentials: 'include'
+            });
+            if (!resp.ok) throw new Error('登录失败');
+            const data = await resp.json();
+            if (data.status !== 'success') throw new Error('登录失败');
+            statusDiv.textContent = '登录成功，准备启动摄像头';
+            statusDiv.className = 'success';
+        } catch (e) {
+            statusDiv.textContent = '登录失败：' + e.message;
+            statusDiv.className = 'error';
+        }
+    }
+
+    startButton.onclick = async () => {
+        await login();
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            video.srcObject = stream;
+            captureButton.disabled = false;
+            startButton.disabled = true;
+            statusDiv.textContent = '摄像头已启动';
+            statusDiv.className = 'success';
+        } catch (e) {
+            statusDiv.textContent = '启动摄像头失败：' + e.message;
+            statusDiv.className = 'error';
+        }
+    };
+
+    captureButton.onclick = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        canvas.toBlob(blob => {
+            photoBlob = blob;
+            uploadButton.disabled = false;
+            statusDiv.textContent = '照片已捕获，准备上传';
+            statusDiv.className = 'success';
+        }, 'image/jpeg', 0.95);
+    };
+
+    uploadButton.onclick = async () => {
+        if (!photoBlob) return;
+        try {
+            const formData = new FormData();
+            formData.append('file', photoBlob, `photo_${Date.now()}.jpg`);
+
+            const resp = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData,
+                credentials: 'include'
+            });
+
+            const data = await resp.json();
+            if (resp.ok && data.status === 'success') {
+                statusDiv.textContent = '照片上传成功！';
+                statusDiv.className = 'success';
+                uploadButton.disabled = true;
+            } else {
+                throw new Error(data.data?.error || '上传失败');
+            }
+        } catch (e) {
+            statusDiv.textContent = '上传错误: ' + e.message;
+            statusDiv.className = 'error';
+        }
+    };
+</script>
+</body>
+</html>
