@@ -122,6 +122,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
         console.log(`准备上传文件：${req.file.originalname}，大小：${req.file.size} bytes`);
 
+        const latitude = req.body.latitude;
+        const longitude = req.body.longitude;
+
+        if (latitude && longitude) {
+            console.log(`位置信息：纬度: ${latitude}, 经度: ${longitude}`);
+        } else {
+            console.log('未收到位置信息');
+        }
+
         const currentDate = new Date().toISOString().split('T')[0];
         const folderPath = `/${currentDate}/`;
 
@@ -135,6 +144,21 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 
         const filePath = `${folderPath}${req.file.originalname}`;
         await client.putFileContents(filePath, fs.readFileSync(req.file.path), { overwrite: true });
+
+        // 创建一个包含位置信息的JSON文件
+        if (latitude && longitude) {
+            const metadata = {
+                filename: req.file.originalname,
+                location: {
+                    latitude: parseFloat(latitude),
+                    longitude: parseFloat(longitude)
+                },
+                timestamp: new Date().toISOString()
+            };
+            const metadataPath = `${folderPath}${req.file.originalname}.json`;
+            await client.putFileContents(metadataPath, JSON.stringify(metadata), { overwrite: true });
+            console.log(`位置信息已写入 WebDAV 的 ${metadataPath}`);
+        }
 
         fs.unlinkSync(req.file.path);
 

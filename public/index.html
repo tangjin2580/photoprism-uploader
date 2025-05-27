@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ip信息 拍照上传</title>
+    <title>拍照上传</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -134,6 +134,7 @@
     let stream = null;
     let photoData = null;
     let previewUrl = null;
+    let locationData = null;
 
     function formatTimestamp(date) {
         const pad = (n) => n.toString().padStart(2, '0');
@@ -143,6 +144,27 @@
             pad(date.getHours()) +
             pad(date.getMinutes()) +
             pad(date.getSeconds());
+    }
+
+    // 获取位置信息
+    function getLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition((position) => {
+                locationData = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude
+                };
+                statusDiv.textContent = "位置信息已获取";
+                statusDiv.className = "success";
+            }, (error) => {
+                statusDiv.textContent = "无法获取位置信息: " + error.message;
+                statusDiv.className = "error";
+                console.error("位置错误:", error);
+            });
+        } else {
+            statusDiv.textContent = "浏览器不支持地理位置";
+            statusDiv.className = "error";
+        }
     }
 
     // 启动摄像头
@@ -166,6 +188,9 @@
             startButton.disabled = true;
             statusDiv.textContent = "摄像头已启动";
             statusDiv.className = "success";
+
+            // 获取位置信息
+            getLocation();
         } catch (err) {
             statusDiv.textContent = "无法访问摄像头: " + err.message;
             statusDiv.className = "error";
@@ -232,6 +257,11 @@
         const filename = `YiBao_${timestamp}.jpg`;
         formData.append('file', photoData, filename);
 
+        if (locationData) {
+            formData.append('latitude', locationData.latitude);
+            formData.append('longitude', locationData.longitude);
+        }
+
         try {
             const uploadUrl = window.location.origin + '/upload';
 
@@ -292,29 +322,45 @@
         const filename = `YiBao_${timestamp}.jpg`;
         formData.append('file', photoData, filename);
 
-        try {
-            const uploadUrl = window.location.origin + '/upload';
+        // 获取位置信息
+        getLocation();
 
-            const uploadResponse = await fetch(uploadUrl, {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (uploadResponse.ok) {
-                const responseJson = await uploadResponse.json();
-                statusDiv.textContent = responseJson.message || "照片上传成功！";
-                statusDiv.className = "success";
-                localUploadButton.disabled = true;
-            } else {
-                const errorJson = await uploadResponse.json();
-                throw new Error(`上传失败: ${errorJson.error || uploadResponse.statusText}`);
+        // 等待位置信息获取完成
+        setTimeout(() => {
+            if (locationData) {
+                formData.append('latitude', locationData.latitude);
+                formData.append('longitude', locationData.longitude);
             }
-        } catch (err) {
-            statusDiv.textContent = "上传错误: " + err.message;
-            statusDiv.className = "error";
-            console.error("上传错误:", err);
-        }
+
+            uploadPhoto(formData);
+        }, 1000); // 等待1秒以确保位置信息已获取
     });
+
+    // 上传照片的函数
+    function uploadPhoto(formData) {
+        fetch(window.location.origin + '/upload', {
+            method: 'POST',
+            body: formData,
+        })
+            .then(uploadResponse => {
+                if (uploadResponse.ok) {
+                    return uploadResponse.json().then(responseJson => {
+                        statusDiv.textContent = responseJson.message || "照片上传成功！";
+                        statusDiv.className = "success";
+                        localUploadButton.disabled = true;
+                    });
+                } else {
+                    return uploadResponse.json().then(errorJson => {
+                        throw new Error(`上传失败: ${errorJson.error || uploadResponse.statusText}`);
+                    });
+                }
+            })
+            .catch(err => {
+                statusDiv.textContent = "上传错误: " + err.message;
+                statusDiv.className = "error";
+                console.error("上传错误:", err);
+            });
+    }
 </script>
 </body>
 </html>
